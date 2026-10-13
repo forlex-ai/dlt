@@ -71,7 +71,7 @@ class GateTests(unittest.TestCase):
         self.assertFalse(gate().classify(row, [], "forlex-ai/unit")["suppressed"])
 
     def test_exception_requires_exact_value_detector_path_commit_and_repo(self):
-        """Verify exception requires exact value detector path commit and repo."""
+        """Verify fail-closed source qualification."""
         row = finding()
         rule = exception(row)
         self.assertTrue(gate().classify(row, [rule], "forlex-ai/unit")["suppressed"])
@@ -107,7 +107,7 @@ class GateTests(unittest.TestCase):
         self.assertNotIn("VerificationError", output)
 
     def test_secret_in_filename_is_not_published(self):
-        """Never publish credential bytes carried in Git path metadata."""
+        """Secret in filename is not published."""
         raw = "synthetic-path-credential"
         row = finding(raw, path="tests/" + raw + ".py")
         result = gate().classify(row, [], "forlex-ai/unit")
@@ -147,7 +147,7 @@ class GateTests(unittest.TestCase):
                     gate().read_policy(policy)
 
     def test_validate_policy_cli_uses_strict_policy_and_redacts_rejections(self):
-        """Validate the actual candidate policy without publishing rejected field values."""
+        """Verify fail-closed source qualification."""
         secret = "sensitive-policy-authority"
         rule = exception(finding())
         invalid = (
@@ -176,7 +176,7 @@ class GateTests(unittest.TestCase):
             self.assertEqual(subprocess.run(command, capture_output=True, check=False).returncode, 0)
 
     def test_scanner_error_and_invalid_output_fail_and_never_expose_output(self):
-        """Verify scanner error and invalid output fail and never expose output."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -216,7 +216,7 @@ class GateTests(unittest.TestCase):
                 self.assertEqual(list(root.glob("trufflehog-raw*")), [])
 
     def test_scanner_has_no_inherited_tokens_and_no_live_verification(self):
-        """Verify scanner has no inherited tokens and no live verification."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -257,7 +257,7 @@ class GateTests(unittest.TestCase):
                     os.environ["GH_TOKEN"] = original
 
     def test_git_range_uses_merge_base_without_losing_intermediate_commits(self):
-        """Verify git range uses merge base without losing intermediate commits."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -327,7 +327,7 @@ class GateTests(unittest.TestCase):
             self.assertEqual(gate().scan(repo, head, None, scanner, policy, "forlex-ai/unit", 0.1)["result"], "error")
 
     def test_stale_pr_and_foreign_check_cannot_publish_success(self):
-        """Refuse changed source and a check owned by another publishing app."""
+        """Verify fail-closed source qualification."""
         module = gate()
         source = {"repository": "forlex-ai/unit", "pr": 1, "head": "a" * 40, "base": "b" * 40, "check_id": 3}
         report = {**source, "version": 1, "result": "pass", "blocked": 0, "suppressed": 0, "commit_count": 2}
@@ -349,7 +349,7 @@ class GateTests(unittest.TestCase):
         self.assertFalse(any(method == "PATCH" for method, _ in calls))
 
     def test_original_check_identity_mismatch_never_patches(self):
-        """Reject checks with a different original identity or publishing app."""
+        """Original check identity mismatch never patches."""
         source = {"repository": "forlex-ai/unit", "pr": 1, "head": "a" * 40, "base": "b" * 40, "check_id": 3}
         report = {**source, "version": 1, "result": "pass", "blocked": 0, "suppressed": 0, "commit_count": 2}
         owned = {"id": 3, "head_sha": source["head"], "name": "TruffleHog secret scan", "app": {"id": 15368}}
@@ -377,7 +377,7 @@ class GateTests(unittest.TestCase):
                 self.assertFalse(any(method == "PATCH" for method, _ in calls))
 
     def test_changed_or_unreadable_pr_finishes_original_owned_check_as_failure(self):
-        """Close the original check safely when current PR evidence changes or is unavailable."""
+        """Verify fail-closed source qualification."""
         secret = "sensitive-current-pr-read-error"
         source = {"repository": "forlex-ai/unit", "pr": 1, "head": "a" * 40, "base": "b" * 40, "check_id": 3}
         report = {**source, "version": 1, "result": "pass", "blocked": 0, "suppressed": 0, "commit_count": 2}
@@ -422,7 +422,7 @@ class GateTests(unittest.TestCase):
                 self.assertNotIn(secret, json.dumps(result))
 
     def test_check_read_and_patch_errors_refuse_without_exposing_provider_text(self):
-        """Unavailable check identity or completion must not claim a terminal result."""
+        """Verify fail-closed source qualification."""
         secret = "sensitive-check-provider-error"
         source = {"repository": "forlex-ai/unit", "pr": 1, "head": "a" * 40, "base": "b" * 40, "check_id": 3}
         report = {**source, "version": 1, "result": "pass", "blocked": 0, "suppressed": 0, "commit_count": 2}
@@ -448,7 +448,7 @@ class GateTests(unittest.TestCase):
                 self.assertTrue(all(body["conclusion"] == "failure" for body in patches))
 
     def test_patch_response_must_confirm_original_owned_terminal_result(self):
-        """Never infer successful completion from an incomplete or contradictory API response."""
+        """Verify fail-closed source qualification."""
         source = {"repository": "forlex-ai/unit", "pr": None, "head": "a" * 40, "base": None, "check_id": 3}
         report = {**source, "version": 1, "result": "pass", "blocked": 0, "suppressed": 0, "commit_count": 2}
         owned = {"id": 3, "head_sha": source["head"], "name": "TruffleHog secret scan", "app": {"id": 15368}}
@@ -469,7 +469,7 @@ class GateTests(unittest.TestCase):
                     module.publish(source, report)
 
     def test_failed_report_counts_are_redacted_in_published_failure(self):
-        """Malformed counts cannot carry secret bytes into a terminal summary."""
+        """Verify fail-closed source qualification."""
         module = gate()
         secret = "sensitive-report-count"
         source = {"repository": "forlex-ai/unit", "pr": None, "head": "a" * 40, "base": None, "check_id": 3}
@@ -482,7 +482,7 @@ class GateTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(result))
 
     def test_missing_and_inconsistent_reports_publish_failure(self):
-        """Do not accept a declared pass with failed or incomplete scan counts."""
+        """Verify fail-closed source qualification."""
         module = gate()
         source = {"repository": "forlex-ai/unit", "pr": None, "head": "a" * 40, "base": None, "check_id": 3}
 
@@ -501,7 +501,7 @@ class GateTests(unittest.TestCase):
             self.assertEqual(module.publish(source, report)["conclusion"], "failure")
 
     def test_publish_cli_unreadable_or_nonobject_report_finishes_owned_check_as_failure(self):
-        """Damaged report artifacts still terminate only the verified trusted check."""
+        """Verify fail-closed source qualification."""
         secret = "sensitive-report-artifact"
         source = {"repository": "forlex-ai/unit", "pr": 1, "head": "a" * 40, "base": "b" * 40, "check_id": 3}
         owned = {"id": 3, "head_sha": source["head"], "name": "TruffleHog secret scan", "app": {"id": 15368}}
@@ -556,7 +556,7 @@ class GateTests(unittest.TestCase):
                     self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue() + json.dumps(calls))
 
     def test_publish_cli_unreadable_context_cannot_choose_a_check(self):
-        """Refuse before API access when trusted check identity cannot be read."""
+        """Verify fail-closed source qualification."""
         secret = "sensitive-context-artifact"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -583,14 +583,14 @@ class GateTests(unittest.TestCase):
                     self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue())
 
     def test_unsupported_events_cannot_create_checks(self):
-        """Allow only the explicitly supported trusted workflow events."""
+        """Unsupported events cannot create checks."""
         module = gate()
         module.github = lambda *args, **kwargs: self.fail("An unsupported event reached the GitHub API")
         with self.assertRaises(ValueError):
             module.context({"repository": {"full_name": "forlex-ai/unit"}}, "issue_comment", "forlex-ai/unit")
 
     def test_tag_push_uses_native_commit_head_and_full_history_scope(self):
-        """An updated annotated tag's prior object cannot limit metadata admission."""
+        """Verify fail-closed source qualification."""
         module = gate()
         module.github = lambda *args, **kwargs: {"id": 3}
         event = {
@@ -610,7 +610,7 @@ class GateTests(unittest.TestCase):
             self.assertNotIn("tag_object", source)
 
     def test_tag_context_cli_outputs_validated_exact_pushed_object(self):
-        """The inert checkout must receive the immutable event object, never a mutable ref."""
+        """Verify fail-closed source qualification."""
         module = gate()
         module.github = lambda *args, **kwargs: {"id": 3}
         with tempfile.TemporaryDirectory() as directory:
@@ -644,7 +644,7 @@ class GateTests(unittest.TestCase):
             self.assertNotIn("refs/tags/release", gha_output.read_text())
 
     def test_tag_report_must_bind_exact_pushed_object_and_ref_digest(self):
-        """A commit-only pass cannot stand in for the pushed tag object's scan."""
+        """Verify fail-closed source qualification."""
         module = gate()
         source = {
             "repository": "forlex-ai/unit",
@@ -711,7 +711,7 @@ class NativeScannerTests(unittest.TestCase):
         return gate().scan(repo, head, base, Path(os.environ["TRUFFLEHOG_BINARY"]), policy, "forlex-ai/unit", 60)
 
     def test_annotated_tag_message_is_scanned_only_in_full_history_and_never_excepted(self):
-        """Current tag metadata blocks independently of commit-range fixture policy."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -746,7 +746,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertEqual([source["commit"] for source in tag_sources], [tag])
 
     def test_nested_annotated_tag_metadata_remains_scanned_after_inner_ref_is_deleted(self):
-        """Scan every tag object reachable through a current annotated tag ref."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -776,7 +776,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertEqual(admitted, {inner, outer})
 
     def test_pushed_tag_object_remains_bound_after_ref_moves_and_missing_object_refuses(self):
-        """Current clean metadata cannot replace an immutable pushed tag object."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -817,7 +817,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertEqual(pushed_scan()["result"], "error")
 
     def test_lightweight_tag_push_is_commit_bound_and_invalid_tag_scope_refuses(self):
-        """Lightweight pushes scan commits without inventing annotated metadata."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -896,7 +896,7 @@ class NativeScannerTests(unittest.TestCase):
                 self.assertNotIn(raw, json.dumps(report))
 
     def test_modified_rename_is_scanned_in_full_history_and_pr_range(self):
-        """Cover a high-similarity rename that native Git history skipped."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -916,7 +916,7 @@ class NativeScannerTests(unittest.TestCase):
                 self.assertNotIn(raw, json.dumps(report))
 
     def test_wordlist_and_filename_do_not_waive_or_expose_canaries(self):
-        """Keep native filtered findings and hide arbitrary source filenames."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -930,7 +930,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertNotIn(raw, json.dumps(report))
 
     def test_commit_metadata_and_symlink_targets_are_scanned_as_inert_data(self):
-        """Preserve metadata coverage and never follow candidate symlinks."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -945,7 +945,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertNotIn(raw, json.dumps(report))
 
     def test_exact_fixture_exception_does_not_waive_new_commit_associations(self):
-        """A subsequent file edit must qualify its own immutable exception."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
@@ -966,7 +966,7 @@ class NativeScannerTests(unittest.TestCase):
             self.assertGreater(report["suppressed"], 0)
 
     def test_real_scanner_catches_introduced_then_deleted_test_directory_canary(self):
-        """Verify real scanner catches introduced then deleted test directory canary."""
+        """Verify fail-closed source qualification."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"

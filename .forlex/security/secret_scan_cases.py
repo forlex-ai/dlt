@@ -125,6 +125,50 @@ def pr_api_fixture(module):
     return event, responses, checks, calls
 
 
+def lifecycle_rows():
+    """Build the exact two v3.99.2 offline filesystem lifecycle schemas."""
+    common = {"level": "info-0", "ts": "2026-10-13T17:45:44-07:00", "logger": "trufflehog"}
+    return [
+        {
+            **common,
+            "msg": "running source",
+            "source_manager_worker_id": "II014",
+            "with_units": True,
+        },
+        {
+            **common,
+            "msg": "finished scanning",
+            "chunks": 3,
+            "bytes": 241,
+            "verified_secrets": 0,
+            "unverified_secrets": 0,
+            "scan_duration": "4.288463ms",
+            "trufflehog_version": "3.99.2",
+            "verification_caching": {
+                "Hits": 0,
+                "Misses": 0,
+                "HitsWasted": 0,
+                "AttemptsSaved": 0,
+                "VerificationTimeSpentMS": 0,
+            },
+        },
+    ]
+
+
+def with_lifecycle(body):
+    """Make a successful fake scanner emit the exact mandatory native pair."""
+    running, finished = lifecycle_rows()
+    return (
+        "#!/usr/bin/env python3\nimport sys\nprint("
+        + repr(json.dumps(running))
+        + ", file=sys.stderr)\n"
+        + body
+        + "\nprint("
+        + repr(json.dumps(finished))
+        + ", file=sys.stderr)\n"
+    )
+
+
 class _GateMoreCases:
     def test_pr_context_uses_current_base_ref_and_binds_both_evaluated_commits(self):
         """A cached Pulls API base cannot select obsolete qualification history."""
@@ -381,9 +425,11 @@ class _GateMoreCases:
             marker = root / "scanner-called"
             scanner = root / "scanner"
             scanner.write_text(
-                "#!/usr/bin/env python3\nfrom pathlib import Path\nPath("
-                + repr(str(marker))
-                + ').write_text("called")\n'
+                with_lifecycle(
+                    "#!/usr/bin/env python3\nfrom pathlib import Path\nPath("
+                    + repr(str(marker))
+                    + ').write_text("called")\n'
+                )
             )
             scanner.chmod(0o700)
             policy = root / "accepted-policy"

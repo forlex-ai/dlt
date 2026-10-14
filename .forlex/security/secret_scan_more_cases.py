@@ -11,6 +11,7 @@ from secret_scan_cases import (
     subprocess,
     sys,
     tempfile,
+    with_lifecycle,
 )
 
 
@@ -402,9 +403,11 @@ class _GateFinalCases:
             policy.write_text('{"version":1,"exceptions":[]}')
             scanner = root / "scanner"
             scanner.write_text(
-                "#!/usr/bin/env python3\nimport os,sys\nassert not any(k in os.environ for k in"
-                " ('GH_TOKEN','GITHUB_TOKEN','AWS_SECRET_ACCESS_KEY'))\nassert '--no-verification'"
-                " in sys.argv\nassert '--no-ignore-tag' in sys.argv\n"
+                with_lifecycle(
+                    "#!/usr/bin/env python3\nimport os,sys\nassert not any(k in os.environ for k in"
+                    " ('GH_TOKEN','GITHUB_TOKEN','AWS_SECRET_ACCESS_KEY'))\nassert"
+                    " '--no-verification' in sys.argv\nassert '--no-ignore-tag' in sys.argv\n"
+                )
             )
             scanner.chmod(0o700)
             original = os.environ.get("GH_TOKEN")

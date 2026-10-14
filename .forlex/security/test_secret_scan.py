@@ -22,9 +22,10 @@ from secret_scan_cases import (
 )
 from secret_scan_more_cases import _GateFinalCases
 from secret_scan_v4_cases import _GateV4Cases, _NativeV4Cases
+from secret_scan_v5_cases import _GateV5Cases, _NativeV5Cases
 
 
-class GateTests(_GateV4Cases, _GateMoreCases, _GateFinalCases, unittest.TestCase):
+class GateTests(_GateV5Cases, _GateV4Cases, _GateMoreCases, _GateFinalCases, unittest.TestCase):
     """Exercise redaction, exception boundaries and scanner failure behavior."""
 
     def test_changed_or_unreadable_pr_finishes_original_owned_check_as_failure(self):
@@ -484,7 +485,7 @@ class GateTests(_GateV4Cases, _GateMoreCases, _GateFinalCases, unittest.TestCase
     os.environ.get("TRUFFLEHOG_BINARY"),
     "Real pinned scanner not provided; native qualification is separate",
 )
-class NativeScannerTests(_NativeV4Cases, unittest.TestCase):
+class NativeScannerTests(_NativeV5Cases, _NativeV4Cases, unittest.TestCase):
     """Exercise real offline detection in disposable Git history."""
 
     def git(self, repo, *args):

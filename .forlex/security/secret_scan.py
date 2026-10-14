@@ -2,6 +2,7 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -37,6 +38,16 @@ MERGE_POLL_INTERVAL = 1
 OUTPUT_LIMIT = 256 * 1024 * 1024
 DIAGNOSTIC_LIMIT = 16 * 1024 * 1024
 POLICY_LIMIT = 1024 * 1024
+
+
+# Load only the accepted runtime's own sibling; never search candidate paths.
+_formats_spec = importlib.util.spec_from_file_location(
+    "_forlex_secret_scan_formats", Path(__file__).with_name("secret_scan_formats.py")
+)
+_formats_module = importlib.util.module_from_spec(_formats_spec)
+_formats_spec.loader.exec_module(_formats_module)
+unsupported_archive = _formats_module.unsupported_archive
+valid_lifecycle_diagnostic = _formats_module.valid_lifecycle_diagnostic
 
 
 class SecretScanRefusal(ValueError):
@@ -173,7 +184,6 @@ def classify(row, exceptions, repository):
             ).date():
                 exception_id = rule["id"]
                 break
-    # Deliberately discard Raw, RawV2, Redacted, email and verification error text.
     return {
         "detector": detector,
         "commit": commit,
@@ -289,7 +299,6 @@ def materialize(
             ("commit", commit),
             {"commit": commit, "file": "@commit-metadata", "kind": "commit_metadata"},
         )
-        # A merge associates only content novel at the same path/mode in every parent.
         args = ["diff-tree", "--no-renames", "--no-commit-id", "--raw", "-z", "-r"]
         novel = None
         for parent in parents[1:] or [None]:
@@ -314,7 +323,6 @@ def materialize(
             source = {"commit": commit, "file": path, "kind": "file_content"}
             add(("filename", raw_path), {**source, "kind": "filename"})
             if mode == b"160000":
-                # Child content belongs to its own repository's independently accepted gate.
                 continue
             if mode not in {b"100644", b"100755", b"120000"}:
                 raise SecretScanRefusal("unsupported Git object mode")
@@ -385,7 +393,7 @@ def materialize(
             env=environment,
         )
         try:
-            for (kind, object_id), (path, _) in objects:
+            for (kind, object_id), (path, sources) in objects:
                 header = process.stdout.readline(200)
                 fields = header.rstrip(b"\n").split()
                 if (
@@ -401,6 +409,18 @@ def materialize(
                 with path.open("wb") as output:
                     os.chmod(path, 0o600)
                     remaining = size
+                    if kind == "blob":
+                        if time.monotonic() >= deadline:
+                            raise SecretScanRefusal("source extraction timeout")
+                        prefix = process.stdout.read(min(512, remaining))
+                        if len(prefix) != min(512, remaining):
+                            raise SecretScanRefusal("truncated Git object")
+                        if unsupported_archive(prefix, sources):
+                            raise SecretScanRefusal(
+                                "archive or compressed blob requires separate qualification"
+                            )
+                        output.write(prefix)
+                        remaining -= len(prefix)
                     while remaining:
                         if time.monotonic() >= deadline:
                             raise SecretScanRefusal("source extraction timeout")
@@ -429,18 +449,24 @@ def materialize(
 
 
 def validate_diagnostics(path):
-    "Refuse source/detector errors even when the native scanner exits zero."
+    "Refuse unknown or incomplete diagnostics even when native exits zero."
     if path.stat().st_size > DIAGNOSTIC_LIMIT:
         raise SecretScanRefusal("scanner diagnostic limit exceeded")
+    expected = ("running source", "finished scanning")
+    seen = 0
     with path.open() as stream:
         for line in stream:
             row = strict_json(line)
             if (
-                not isinstance(row, dict)
-                or not isinstance(row.get("level"), str)
-                or not re.fullmatch(r"(?:info(?:-[0-5])?|debug)", row["level"])
+                seen >= len(expected)
+                or not valid_lifecycle_diagnostic(row)
+                or row["msg"] != expected[seen]
             ):
                 raise SecretScanRefusal("scanner reported incomplete detection")
+            seen += 1
+    if seen != len(expected):
+        raise SecretScanRefusal("scanner reported incomplete detection")
+    return {"verified": row["verified_secrets"], "unverified": row["unverified_secrets"]}
 
 
 def run_bounded_scanner(
@@ -620,7 +646,6 @@ def scan(
                 {"candidate_policy_validated": True, "candidate_policy_source": evaluated}
             )
         report.update({"effective_base": effective, "commit_count": len(commits)})
-        # No candidate scripts, hooks, dependencies, provider verification or injected credentials.
         command = [
             str(Path(scanner).resolve()),
             "filesystem",
@@ -658,14 +683,27 @@ def scan(
             code = run_bounded_scanner(command, environment, output, errors, deadline)
             if code != 0:
                 raise SecretScanRefusal("scanner execution failed")
-            validate_diagnostics(errors)
+            expected_counts = validate_diagnostics(errors)
             if output.stat().st_size > OUTPUT_LIMIT:
                 raise SecretScanRefusal("scanner output limit exceeded")
+            raw_counts = {"verified": 0, "unverified": 0}
+            with output.open() as stream:
+                for line in stream:
+                    if time.monotonic() >= deadline:
+                        raise SecretScanRefusal("scanner output validation timeout")
+                    if len(line) > 8 * 1024 * 1024 or not line.strip():
+                        raise SecretScanRefusal("invalid scanner stream")
+                    row = strict_json(line)
+                    if not isinstance(row, dict) or not isinstance(row.get("Verified"), bool):
+                        raise SecretScanRefusal("invalid raw detection verification state")
+                    raw_counts["verified" if row["Verified"] else "unverified"] += 1
+            if raw_counts != expected_counts:
+                raise SecretScanRefusal("scanner finding output does not match completion metrics")
             blocked, suppressed = 0, 0
             with output.open() as stream:
                 for line in stream:
-                    if len(line) > 8 * 1024 * 1024 or not line.strip():
-                        raise SecretScanRefusal("invalid scanner stream")
+                    if time.monotonic() >= deadline:
+                        raise SecretScanRefusal("scanner output validation timeout")
                     row = strict_json(line)
                     try:
                         location = row["SourceMetadata"]["Data"]["Filesystem"]
@@ -731,8 +769,6 @@ def github(repository, suffix, *, method="GET", body=None):
 def pr_facts(repository, number, integration_branch):
     "Authenticate current accepted base, live head and exact prospective parents."
     try:
-        # Each API read has a 30-second network timeout; five attempts and four
-        # one-second waits bound both pending computation and stale parent retries.
         for attempt in range(MERGE_POLL_ATTEMPTS):
             facts = _pr_facts(repository, number, integration_branch)
             if facts is not None:
@@ -884,8 +920,6 @@ def context(event, kind, repository, pr_number=0, integration_branch="test"):
                 raise SecretScanRefusal("pushed tag object unavailable")
             base = None
         elif kind == "push" and event.get("after") == "0" * 40:
-            # GitHub sets GITHUB_SHA to the default head for branch deletion.
-            # Retain the deleted branch tip as the only source and scan it fully.
             head, base = event.get("before"), None
             if not isinstance(head, str) or not SHA.fullmatch(head) or head == "0" * 40:
                 raise SecretScanRefusal("deleted branch tip unavailable")
@@ -981,8 +1015,6 @@ def publish(source, report):
     elif source["pr"]:
         success = False
 
-    # Verify both original identities before granting either a terminal success.
-    # This preflight has the same independent cleanup boundary as terminal writes.
     try:
         for target, identity in targets:
             check = github(repository, "check-runs/" + str(identity))
